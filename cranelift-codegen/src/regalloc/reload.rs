@@ -404,21 +404,11 @@ impl<'a> Context<'a> {
         if let Some(constraints) = constraints {
             for (argidx, (op, &arg)) in constraints.ins.iter().zip(args).enumerate() {
                 if op.kind != ConstraintKind::Stack && self.liveness[arg].affinity.is_stack() {
-                    let unit_preference =
-                        if let Some(sigref) = self.cur.func.dfg.call_signature(inst) {
-                            let sig = &self.cur.func.dfg.signatures[sigref];
-                            if let ArgumentLoc::Reg(reg) = sig.params[argidx].location {
-                                Some(reg)
-                            } else {
-                                None
-                            }
-                        } else {
-                            if let ConstraintKind::FixedReg(reg) = op.kind {
-                                Some(reg)
-                            } else {
-                                None
-                            }
-                        };
+                    let unit_preference = if let ConstraintKind::FixedReg(reg) = op.kind {
+                        Some(reg)
+                    } else {
+                        None
+                    };
 
                     self.candidates.push(ReloadCandidate {
                         argidx,
