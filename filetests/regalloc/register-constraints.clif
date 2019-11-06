@@ -1,6 +1,8 @@
 test regalloc
 target x86_64
 
+; test against a regression where using eight general-purpose registers over the
+; end of a basic block could ignore a diversion and result in a miscompile.
 function u0:11(i64 vmctx) -> i32 system_v {
     gv0 = vmctx
     gv1 = load.i64 notrap aligned gv0-8
@@ -23,4 +25,45 @@ function u0:11(i64 vmctx) -> i32 system_v {
         store v11, v23
         call fn0(v0, v10)
         return v6
+}
+
+; test against an error where variable arguments were checked for constraints incorrectly
+; resulting in a regalloc panic.
+function u0:0(i64, i64, i64) -> i64 system_v {
+    sig0 = (i64) system_v
+    sig1 = () system_v
+    fn0 = u0:28 sig0
+
+     ebb0(v0: i64, v1: i64, v2: i64):
+         v27 = iconst.i32 0
+         brz v27, ebb5
+         jump ebb1
+
+     ebb1:
+         trap user0
+
+     ebb5:
+         v49 = iconst.i32 0
+         brz v49, ebb8
+         jump ebb6
+
+     ebb6:
+         trap user0
+
+     ebb8:
+         v65 = iconst.i32 0
+         brz v65, ebb10
+         jump ebb9
+
+     ebb9:
+         trap user0
+
+     ebb10:
+         v69 = iconst.i64 0
+         call fn0(v69)
+         call_indirect.i64 sig1, v0()
+              jump ebb11
+
+     ebb11:
+         trap user0
 }
