@@ -1,9 +1,11 @@
 use core::mem;
 use cranelift_codegen::binemit::{NullRelocSink, NullStackmapSink, NullTrapSink};
+use cranelift_codegen::ir::types;
 use cranelift_codegen::ir::Function;
 use cranelift_codegen::isa::TargetIsa;
 use cranelift_codegen::{settings, Context};
 use cranelift_native::builder as host_isa_builder;
+use memmap::Mmap;
 use memmap::MmapMut;
 
 /// Run a function on a host
@@ -36,12 +38,10 @@ impl FunctionRunner {
     /// interpreted as a failed test and mapped to Err.
     pub fn run(&self) -> Result<(), String> {
         let func = self.function.clone();
-        if !(func.signature.params.is_empty()
-            && func.signature.returns.len() == 1
-            && func.signature.returns.first().unwrap().value_type.is_bool())
-        {
+
+        if !(func.signature.params.is_empty() && func.signature.returns.len() == 1) {
             return Err(String::from(
-                "Functions must have a signature like: () -> boolean",
+                "Functions must have a signature like: () -> ty",
             ));
         }
 
@@ -76,13 +76,57 @@ impl FunctionRunner {
         };
 
         let code_page = code_page.make_exec().map_err(|e| e.to_string())?;
-        let callable_fn: fn() -> bool = unsafe { mem::transmute(code_page.as_ptr()) };
 
-        // execute
-        if callable_fn() {
-            Ok(())
-        } else {
-            Err(format!("Failed: {}", context.func.name.to_string()))
+        fn result<T>(code_page: Mmap) -> T
+        where
+            T: std::fmt::Display,
+        {
+            let callable_fn: fn() -> T = unsafe { mem::transmute(code_page.as_ptr()) };
+            callable_fn()
+        }
+
+        fn result_as_error<T>(code_page: Mmap) -> Result<(), String>
+        where
+            T: std::fmt::Display,
+        {
+            Err(format!(
+                "Function return type is not boolean, return value is {}",
+                result::<T>(code_page)
+            ))
+        }
+
+        fn result_as_error_hex<T>(code_page: Mmap) -> Result<(), String>
+        where
+            T: std::fmt::Display,
+            T: std::fmt::UpperHex,
+        {
+            Err(format!(
+                "Function return type is not boolean, return value is {:#X}",
+                result::<T>(code_page)
+            ))
+        }
+
+        let ret_value_type = context.func.signature.returns.first().unwrap().value_type;
+        if ret_value_type.is_bool() {
+            return match result::<bool>(code_page) {
+                true => Ok(()),
+                false => Err(format!("Failed: {}", context.func.name.to_string())),
+            };
+        }
+
+        // If function return type is not boolean, return the return value as an error.
+        match ret_value_type {
+            types::I8 => result_as_error_hex::<u8>(code_page),
+            types::I16 => result_as_error_hex::<u16>(code_page),
+            types::I32 => result_as_error_hex::<u32>(code_page),
+            types::I64 => result_as_error_hex::<u64>(code_page),
+            types::I128 => result_as_error_hex::<u128>(code_page),
+            types::F32 => result_as_error::<f32>(code_page),
+            types::F64 => result_as_error::<f64>(code_page),
+            _ => Err(format!(
+                "Function return type not supported for debug-printing yet: {}",
+                ret_value_type
+            )),
         }
     }
 }
